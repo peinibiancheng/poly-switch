@@ -1,0 +1,22 @@
+# Binaries (use explicit paths to avoid matching source dirs)
+poly-switch
+*.exe
+bin/
+
+# Go
+*.test
+*.out
+*.prof
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local environment/config
+.env
+.local
