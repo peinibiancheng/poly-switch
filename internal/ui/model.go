@@ -41,6 +41,31 @@ var (
 	warningStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#F59E0B"))
+
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#E5E7EB")).
+			Background(lipgloss.Color("#1E1B4B")).
+			Padding(0, 2)
+
+	detailTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#7C3AED"))
+
+	labelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9CA3AF"))
+
+	valueStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#E5E7EB"))
+
+	statusActiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#10B981"))
+
+	statusInactiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6B7280"))
+
+	separatorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#374151"))
 )
 
 // item represents a selectable list entry in the TUI.
@@ -126,7 +151,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if h < 1 {
 			h = 1
 		}
-		m.langList.SetSize(msg.Width, h)
+		leftWidth := msg.Width * 2 / 5
+		if leftWidth < 30 {
+			leftWidth = 30
+		}
+		m.langList.SetSize(leftWidth, h)
 		m.versionList.SetSize(msg.Width, h)
 		return m, nil
 
@@ -290,6 +319,58 @@ func (m Model) pathWarning() string {
 	return s
 }
 
+func (m Model) envDetailsView() string {
+	selected, ok := m.langList.SelectedItem().(item)
+	if !ok || m.app.Config == nil {
+		return ""
+	}
+
+	langName := selected.title
+	var lang *config.Language
+	for i := range m.app.Config.Languages {
+		if m.app.Config.Languages[i].Name == langName {
+			lang = &m.app.Config.Languages[i]
+			break
+		}
+	}
+	if lang == nil {
+		return ""
+	}
+
+	versions := m.app.Versions[langName]
+	activeInfo, hasActive := m.app.State.ActiveVersions[lang.SymlinkName]
+
+	// Find the active version's binary path
+	var activeBinPath string
+	for _, v := range versions {
+		if v.IsActive {
+			activeBinPath = v.BinaryPath
+			break
+		}
+	}
+
+	s := detailTitleStyle.Render("ENV DETAILS") + "\n"
+	s += subtleStyle.Render(strings.Repeat("─", 20)) + "\n\n"
+
+	// Status
+	if hasActive {
+		s += labelStyle.Render("Status    ") + statusActiveStyle.Render("● Active") + "\n"
+		s += labelStyle.Render("Version   ") + valueStyle.Render(activeInfo.Version) + "\n"
+		if activeBinPath != "" {
+			s += labelStyle.Render("Binary    ") + valueStyle.Render(activeBinPath) + "\n"
+		}
+	} else {
+		s += labelStyle.Render("Status    ") + statusInactiveStyle.Render("● Inactive") + "\n"
+		s += labelStyle.Render("Version   ") + subtleStyle.Render("—") + "\n"
+	}
+
+	// Home paths and detected versions
+	s += labelStyle.Render("Homes     ") + valueStyle.Render(fmt.Sprintf("%d configured", len(lang.HomePaths))) + "\n"
+	s += labelStyle.Render("Detected  ") + valueStyle.Render(fmt.Sprintf("%d versions", len(versions))) + "\n"
+
+	return s
+}
+
 func (m Model) View() string {
 	switch m.state {
 	case stateLoading:
@@ -308,41 +389,61 @@ func (m Model) View() string {
 }
 
 func (m Model) loadingView() string {
-	s := fmt.Sprintf("\n  %s Scanning for installed versions...\n", m.spinner.View())
+	s := headerStyle.Render("⚡ poly-switch") + "\n"
+	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n\n"
+	s += fmt.Sprintf("  %s Scanning for installed versions...\n", m.spinner.View())
 	s += subtleStyle.Render("\n  q  quit")
 	return s
 }
 
 func (m Model) langListView() string {
-	s := titleStyle.Render("poly-switch") + "\n"
+	// Header
+	s := headerStyle.Render("⚡ poly-switch") + "\n"
+	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n"
+
+	// Two-column layout: language list | environment details
+	leftCol := m.langList.View()
+	rightCol := m.envDetailsView()
+	sep := "  " + separatorStyle.Render("│") + "  "
+	s += lipgloss.JoinHorizontal(lipgloss.Top, leftCol, sep, rightCol) + "\n"
+
+	// PATH warning below the columns
 	s += m.pathWarning()
 	if !m.binInPath {
 		s += "\n"
 	}
-	s += m.langList.View()
-	s += "\n" + subtleStyle.Render("  up/down navigate  enter select  q/esc quit")
+
+	// Footer
+	s += subtleStyle.Render("  ↑/↓ navigate  enter select  q/esc quit")
 	return s
 }
 
 func (m Model) versionListView() string {
-	s := titleStyle.Render(fmt.Sprintf("poly-switch / %s", m.selectedLang)) + "\n"
+	s := headerStyle.Render(fmt.Sprintf("⚡ poly-switch / %s", m.selectedLang)) + "\n"
+	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n"
 	s += m.versionList.View()
 	s += "\n" + subtleStyle.Render("  ↑/↓ navigate  enter select  esc back  q quit")
 	return s
 }
 
 func (m Model) applyingView() string {
-	return fmt.Sprintf("\n  %s Switching to %s %s...\n",
+	s := headerStyle.Render(fmt.Sprintf("⚡ poly-switch / %s", m.selectedLang)) + "\n"
+	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n\n"
+	s += fmt.Sprintf("  %s Switching to %s %s...\n",
 		m.spinner.View(), m.selectedLang, m.selectedVerLabel)
+	return s
 }
 
 func (m Model) doneView() string {
+	s := headerStyle.Render("⚡ poly-switch") + "\n"
+	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n\n"
 	if m.err != nil {
-		return fmt.Sprintf("\n  %s Failed to switch: %v\n\n  Press any key to quit.\n",
+		s += fmt.Sprintf("  %s Failed to switch: %v\n\n  Press any key to quit.\n",
 			errorStyle.Render("ERROR"), m.err)
+		return s
 	}
-	s := fmt.Sprintf("\n  %s Switched to %s %s\n",
-		activeStyle.Render("OK"), m.selectedLang, m.selectedVerLabel)
+	s += fmt.Sprintf("  %s Switched to %s %s\n",
+		activeStyle.Render("✓"), m.selectedLang, m.selectedVerLabel)
 	s += m.pathWarning()
 	s += "\n  Press any key to quit.\n"
 	return s
