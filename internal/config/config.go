@@ -64,8 +64,18 @@ func DefaultConfig() *Config {
 				HomePaths: []string{
 					filepath.Join(home, ".nvm", "versions", "node", "*"),
 					"/usr/local/lib/nodejs/*",
-					"/usr/bin/node*",
 					"/usr/local/bin/node*",
+				},
+			},
+			{
+				Name:        "Go",
+				SymlinkName: "go",
+				BinaryName:  "go",
+				HomePaths: []string{
+					filepath.Join(home, ".gvm", "gos", "*"),
+					filepath.Join(home, ".local", "go", "*"),
+					"/usr/local/go*",
+					"/usr/lib/go-*",
 				},
 			},
 		},

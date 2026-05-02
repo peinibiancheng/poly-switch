@@ -181,6 +181,7 @@ func cleanVersionLabel(langName, label string) string {
 		"java-", "jdk-", "openjdk-",
 		"python-", "cpython-",
 		"node-v", "node-", "v",
+		"go-", "go",
 	}
 	for _, p := range prefixes {
 		if strings.HasPrefix(label, p) {

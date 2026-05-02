@@ -25,7 +25,7 @@
 ## Features
 
 - **Instant version switching** — Symlinks in `~/.poly-switch/bin` activate immediately
-- **Multi-language support** — Java, Python, Node.js with automatic version detection
+- **Multi-language support** — Java, Python, Node.js, and Go with automatic version detection
 - **Smart version discovery** — Scans SDKMAN, pyenv, nvm, and common installation paths
 - **Terminal UI** — Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) for a smooth, interactive experience
 - **PATH awareness** — Warns if `~/.poly-switch/bin` is not in your PATH
@@ -37,6 +37,7 @@
 | Java | `~/.sdkman/candidates/java/*`, `/usr/lib/jvm/*`, `/usr/local/opt/openjdk/*` |
 | Python | `~/.pyenv/versions/*`, `~/.local/python/*`, `/usr/bin/python*`, `/usr/local/bin/python*` |
 | Node.js | `~/.nvm/versions/node/*`, `/usr/local/lib/nodejs/*`, `/usr/bin/node*` |
+| Go | `~/.gvm/gos/*`, `~/.local/go/*`, `/usr/local/go*`, `/usr/lib/go-*` |
 
 ---
 
