@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -36,6 +37,9 @@ func NewApp() (*App, error) {
 	state, err := config.LoadState(statePath)
 	if err != nil {
 		return nil, fmt.Errorf("load state: %w", err)
+	}
+	if err := EnsureTemplates(); err != nil {
+		return nil, fmt.Errorf("ensure templates: %w", err)
 	}
 	return &App{
 		Config:    cfg,
@@ -88,7 +92,7 @@ func (a *App) DetectVersions(lang config.Language) []Version {
 				continue
 			}
 
-			label = cleanVersionLabel(lang.Name, label)
+			label = CleanVersionLabel(lang.Name, label)
 
 			vi := a.State.ActiveVersions[lang.SymlinkName]
 			isActive := vi.Path == match
@@ -174,9 +178,133 @@ func (a *App) ApplySwitch(langName, versionPath string) error {
 	return nil
 }
 
-// cleanVersionLabel strips common prefixes and architecture suffixes from
+// ApplyMirror configures the registry or index URL for the given language.
+func (a *App) ApplyMirror(langName, mirrorName string) error {
+	var lang *config.Language
+	for i := range a.Config.Languages {
+		if a.Config.Languages[i].Name == langName {
+			lang = &a.Config.Languages[i]
+			break
+		}
+	}
+	if lang == nil {
+		return fmt.Errorf("unknown language: %s", langName)
+	}
+
+	var mirror *config.Mirror
+	for i := range lang.Mirrors {
+		if lang.Mirrors[i].Name == mirrorName {
+			mirror = &lang.Mirrors[i]
+			break
+		}
+	}
+	if mirror == nil {
+		return fmt.Errorf("unknown mirror: %s", mirrorName)
+	}
+
+	if mirror.Type == "symlink" {
+		polyDir, _ := config.PolySwitchDir()
+		src := filepath.Join(polyDir, "templates", mirror.Template)
+		
+		dest := mirror.Dest
+		if strings.HasPrefix(dest, "~/") {
+			home, _ := os.UserHomeDir()
+			dest = filepath.Join(home, dest[2:])
+		}
+
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return fmt.Errorf("mkdir dest dir: %w", err)
+		}
+
+		if info, err := os.Lstat(dest); err == nil {
+			if info.Mode()&os.ModeSymlink == 0 {
+				os.Rename(dest, dest+".bak")
+			} else {
+				os.Remove(dest)
+			}
+		}
+
+		if err := os.Symlink(src, dest); err != nil {
+			return fmt.Errorf("create symlink: %w", err)
+		}
+	} else {
+		var cmd *exec.Cmd
+		switch langName {
+		case "Node.js":
+			cmd = exec.Command("npm", "config", "set", "registry", mirror.URL)
+		case "Python":
+			cmd = exec.Command("pip", "config", "set", "global.index-url", mirror.URL)
+		default:
+			return fmt.Errorf("mirror management not supported for %s", langName)
+		}
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("apply mirror: %w", err)
+		}
+	}
+
+	a.State.ActiveMirrors[langName] = mirror.Name
+	return a.State.Save(a.statePath)
+}
+
+// DetectActiveMirror attempts to read the current registry/index URL from the system.
+func (a *App) DetectActiveMirror(langName string) (string, error) {
+	var lang *config.Language
+	for i := range a.Config.Languages {
+		if a.Config.Languages[i].Name == langName {
+			lang = &a.Config.Languages[i]
+			break
+		}
+	}
+	if lang == nil || len(lang.Mirrors) == 0 {
+		return "", nil
+	}
+
+	var activeNames []string
+	
+	if lang.Mirrors[0].Type != "symlink" {
+		var cmd *exec.Cmd
+		switch langName {
+		case "Node.js":
+			cmd = exec.Command("npm", "config", "get", "registry")
+		case "Python":
+			cmd = exec.Command("pip", "config", "get", "global.index-url")
+		}
+		if cmd != nil {
+			if out, err := cmd.Output(); err == nil {
+				url := strings.TrimSpace(string(out))
+				for _, m := range lang.Mirrors {
+					if m.URL == url {
+						return m.Name, nil
+					}
+				}
+				return url, nil
+			}
+		}
+	} else {
+		for _, m := range lang.Mirrors {
+			dest := m.Dest
+			if strings.HasPrefix(dest, "~/") {
+				home, _ := os.UserHomeDir()
+				dest = filepath.Join(home, dest[2:])
+			}
+			if target, err := os.Readlink(dest); err == nil {
+				if strings.HasSuffix(target, m.Template) {
+					activeNames = append(activeNames, m.Name)
+				}
+			}
+		}
+		if len(activeNames) > 0 {
+			return strings.Join(activeNames, ", "), nil
+		}
+	}
+
+	return "", nil
+}
+
+// CleanVersionLabel strips common prefixes and architecture suffixes from
 // version directory names for cleaner display.
-func cleanVersionLabel(langName, label string) string {
+func CleanVersionLabel(langName, label string) string {
 	prefixes := []string{
 		"java-", "jdk-", "openjdk-",
 		"python-", "cpython-",
@@ -189,6 +317,7 @@ func cleanVersionLabel(langName, label string) string {
 			break
 		}
 	}
+	label = strings.TrimPrefix(label, "-")
 	archSuffixes := []string{"-amd64", "-x86_64", "-aarch64", "-arm64"}
 	for _, s := range archSuffixes {
 		if strings.HasSuffix(label, s) {

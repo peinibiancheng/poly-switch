@@ -7,12 +7,22 @@ import (
 	"path/filepath"
 )
 
+// Mirror defines a registry or index URL for a language.
+type Mirror struct {
+	Name     string `json:"name"`
+	URL      string `json:"url,omitempty"`
+	Type     string `json:"type,omitempty"`     // "cmd" or "symlink"
+	Template string `json:"template,omitempty"` // Filename of the template
+	Dest     string `json:"dest,omitempty"`     // Destination path for the symlink
+}
+
 // Language defines metadata for a supported programming language.
 type Language struct {
 	Name        string   `json:"name"`
 	SymlinkName string   `json:"symlink_name"`
 	BinaryName  string   `json:"binary_name"`
 	HomePaths   []string `json:"home_paths"`
+	Mirrors     []Mirror `json:"mirrors,omitempty"`
 }
 
 // Config holds the supported languages configuration.
@@ -29,6 +39,7 @@ type VersionInfo struct {
 // State represents the persisted activation state.
 type State struct {
 	ActiveVersions map[string]VersionInfo `json:"active_versions"`
+	ActiveMirrors  map[string]string      `json:"active_mirrors"`
 }
 
 // DefaultConfig returns the built-in configuration for Java, Python, and Node.
@@ -45,6 +56,20 @@ func DefaultConfig() *Config {
 					"/usr/lib/jvm/*",
 					"/usr/local/opt/openjdk/*",
 				},
+				Mirrors: []Mirror{
+					{
+						Name:     "Maven (Aliyun)",
+						Type:     "symlink",
+						Template: "maven-aliyun.xml",
+						Dest:     "~/.m2/settings.xml",
+					},
+					{
+						Name:     "Gradle (Aliyun)",
+						Type:     "symlink",
+						Template: "gradle-aliyun.gradle",
+						Dest:     "~/.gradle/init.d/poly-switch-mirror.gradle",
+					},
+				},
 			},
 			{
 				Name:        "Python",
@@ -56,6 +81,11 @@ func DefaultConfig() *Config {
 					"/usr/bin/python*",
 					"/usr/local/bin/python*",
 				},
+				Mirrors: []Mirror{
+					{Name: "PyPI (Global)", URL: "https://pypi.org/simple"},
+					{Name: "Tuna (China)", URL: "https://pypi.tuna.tsinghua.edu.cn/simple"},
+					{Name: "Aliyun (China)", URL: "https://mirrors.aliyun.com/pypi/simple/"},
+				},
 			},
 			{
 				Name:        "Node.js",
@@ -65,6 +95,13 @@ func DefaultConfig() *Config {
 					filepath.Join(home, ".nvm", "versions", "node", "*"),
 					"/usr/local/lib/nodejs/*",
 					"/usr/local/bin/node*",
+					"/usr/bin/node*",
+					filepath.Join(home, ".local", "share", "fnm", "node-versions", "*"),
+					filepath.Join(home, ".asdf", "installs", "nodejs", "*"),
+				},
+				Mirrors: []Mirror{
+					{Name: "npm (Global)", URL: "https://registry.npmjs.org/"},
+					{Name: "npmmirror (China)", URL: "https://registry.npmmirror.com"},
 				},
 			},
 			{
@@ -137,6 +174,9 @@ func LoadState(path string) (*State, error) {
 	}
 	if s.ActiveVersions == nil {
 		s.ActiveVersions = make(map[string]VersionInfo)
+	}
+	if s.ActiveMirrors == nil {
+		s.ActiveMirrors = make(map[string]string)
 	}
 	return &s, nil
 }

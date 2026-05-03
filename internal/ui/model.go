@@ -20,6 +20,7 @@ const (
 	stateLoading state = iota
 	stateLangSelect
 	stateVersionSelect
+	stateMirrorSelect
 	stateApplying
 	stateDone
 )
@@ -86,10 +87,14 @@ type Model struct {
 	state            state
 	langList         list.Model
 	versionList      list.Model
+	mirrorList       list.Model
 	spinner          spinner.Model
 	selectedLang     string
 	selectedVerPath  string
 	selectedVerLabel string
+	selectedMirURL   string
+	selectedMirName  string
+	isMirrorApply    bool
 	err              error
 	width            int
 	height           int
@@ -119,12 +124,18 @@ func NewModel(app *core.App) Model {
 	versionList.Styles.Title = titleStyle
 	versionList.SetShowStatusBar(false)
 
+	mirrorList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	mirrorList.Title = "Select Mirror"
+	mirrorList.Styles.Title = titleStyle
+	mirrorList.SetShowStatusBar(false)
+
 	return Model{
 		app:         app,
 		state:       stateLoading,
 		spinner:     s,
 		langList:    langList,
 		versionList: versionList,
+		mirrorList:  mirrorList,
 		binInPath:   checkBinInPath(),
 	}
 }
@@ -157,6 +168,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.langList.SetSize(leftWidth, h)
 		m.versionList.SetSize(msg.Width, h)
+		m.mirrorList.SetSize(msg.Width, h)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -204,6 +216,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m, cmd = m.buildVersionList()
 			return m, cmd
+		case "m":
+			selected, ok := m.langList.SelectedItem().(item)
+			if !ok {
+				return m, nil
+			}
+			m.selectedLang = selected.title
+			var cmd tea.Cmd
+			m, cmd = m.buildMirrorList()
+			return m, cmd
 		default:
 			var cmd tea.Cmd
 			m.langList, cmd = m.langList.Update(msg)
@@ -229,6 +250,29 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		default:
 			var cmd tea.Cmd
 			m.versionList, cmd = m.versionList.Update(msg)
+			return m, cmd
+		}
+
+	case stateMirrorSelect:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			m.state = stateLangSelect
+			return m, nil
+		case "enter":
+			selected, ok := m.mirrorList.SelectedItem().(item)
+			if !ok {
+				return m, nil
+			}
+			m.selectedMirName = selected.title
+			m.selectedMirURL = selected.path // we used path to store URL
+			m.state = stateApplying
+			m.isMirrorApply = true
+			return m, tea.Batch(m.spinner.Tick, m.applyMirror())
+		default:
+			var cmd tea.Cmd
+			m.mirrorList, cmd = m.mirrorList.Update(msg)
 			return m, cmd
 		}
 
@@ -270,6 +314,51 @@ func (m Model) buildVersionList() (Model, tea.Cmd) {
 func (m Model) applySwitch() tea.Cmd {
 	return func() tea.Msg {
 		err := m.app.ApplySwitch(m.selectedLang, m.selectedVerPath)
+		return switchDoneMsg{err: err}
+	}
+}
+
+func (m Model) buildMirrorList() (Model, tea.Cmd) {
+	var lang *config.Language
+	for i := range m.app.Config.Languages {
+		if m.app.Config.Languages[i].Name == m.selectedLang {
+			lang = &m.app.Config.Languages[i]
+			break
+		}
+	}
+
+	if lang == nil || len(lang.Mirrors) == 0 {
+		m.versionList.SetItems([]list.Item{item{title: "No mirrors available", description: "This language doesn't support mirror management"}})
+		m.state = stateMirrorSelect
+		return m, nil
+	}
+
+	activeMirror, _ := m.app.DetectActiveMirror(m.selectedLang)
+
+	items := make([]list.Item, 0, len(lang.Mirrors))
+	for _, mir := range lang.Mirrors {
+		desc := mir.URL
+		if mir.Type == "symlink" {
+			desc = mir.Dest
+		}
+		if strings.Contains(activeMirror, mir.Name) {
+			desc += " [active]"
+		}
+		items = append(items, item{
+			title:       mir.Name,
+			description: desc,
+			path:        mir.Name,
+		})
+	}
+
+	m.mirrorList.SetItems(items)
+	m.state = stateMirrorSelect
+	return m, nil
+}
+
+func (m Model) applyMirror() tea.Cmd {
+	return func() tea.Msg {
+		err := m.app.ApplyMirror(m.selectedLang, m.selectedMirName)
 		return switchDoneMsg{err: err}
 	}
 }
@@ -355,7 +444,7 @@ func (m Model) envDetailsView() string {
 	// Status
 	if hasActive {
 		s += labelStyle.Render("Status    ") + statusActiveStyle.Render("● Active") + "\n"
-		s += labelStyle.Render("Version   ") + valueStyle.Render(activeInfo.Version) + "\n"
+		s += labelStyle.Render("Version   ") + valueStyle.Render(core.CleanVersionLabel(langName, activeInfo.Version)) + "\n"
 		if activeBinPath != "" {
 			s += labelStyle.Render("Binary    ") + valueStyle.Render(activeBinPath) + "\n"
 		}
@@ -368,6 +457,18 @@ func (m Model) envDetailsView() string {
 	s += labelStyle.Render("Homes     ") + valueStyle.Render(fmt.Sprintf("%d configured", len(lang.HomePaths))) + "\n"
 	s += labelStyle.Render("Detected  ") + valueStyle.Render(fmt.Sprintf("%d versions", len(versions))) + "\n"
 
+	// Mirror info
+	if len(lang.Mirrors) > 0 {
+		activeMirrorNames, _ := m.app.DetectActiveMirror(langName)
+		if activeMirrorNames == "" {
+			s += labelStyle.Render("Mirror    ") + statusInactiveStyle.Render("System Default") + "\n"
+		} else {
+			s += labelStyle.Render("Mirror    ") + activeStyle.Render(activeMirrorNames) + "\n"
+		}
+	} else {
+		s += labelStyle.Render("Mirror    ") + subtleStyle.Render("Not Supported") + "\n"
+	}
+
 	return s
 }
 
@@ -379,6 +480,8 @@ func (m Model) View() string {
 		return m.langListView()
 	case stateVersionSelect:
 		return m.versionListView()
+	case stateMirrorSelect:
+		return m.mirrorListView()
 	case stateApplying:
 		return m.applyingView()
 	case stateDone:
@@ -414,7 +517,15 @@ func (m Model) langListView() string {
 	}
 
 	// Footer
-	s += subtleStyle.Render("  ↑/↓ navigate  enter select  q/esc quit")
+	s += subtleStyle.Render("  ↑/↓ navigate  enter select  m manage mirrors  q/esc quit")
+	return s
+}
+
+func (m Model) mirrorListView() string {
+	s := headerStyle.Render(fmt.Sprintf("⚡ poly-switch / %s / Mirrors", m.selectedLang)) + "\n"
+	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n"
+	s += m.mirrorList.View()
+	s += "\n" + subtleStyle.Render("  ↑/↓ navigate  enter select  esc back  q quit")
 	return s
 }
 
@@ -429,8 +540,13 @@ func (m Model) versionListView() string {
 func (m Model) applyingView() string {
 	s := headerStyle.Render(fmt.Sprintf("⚡ poly-switch / %s", m.selectedLang)) + "\n"
 	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n\n"
-	s += fmt.Sprintf("  %s Switching to %s %s...\n",
-		m.spinner.View(), m.selectedLang, m.selectedVerLabel)
+	if m.isMirrorApply {
+		s += fmt.Sprintf("  %s Setting mirror to %s...\n",
+			m.spinner.View(), m.selectedMirName)
+	} else {
+		s += fmt.Sprintf("  %s Switching to %s %s...\n",
+			m.spinner.View(), m.selectedLang, m.selectedVerLabel)
+	}
 	return s
 }
 
@@ -438,12 +554,17 @@ func (m Model) doneView() string {
 	s := headerStyle.Render("⚡ poly-switch") + "\n"
 	s += separatorStyle.Render(strings.Repeat("─", m.width)) + "\n\n"
 	if m.err != nil {
-		s += fmt.Sprintf("  %s Failed to switch: %v\n\n  Press any key to quit.\n",
+		s += fmt.Sprintf("  %s Failed: %v\n\n  Press any key to quit.\n",
 			errorStyle.Render("ERROR"), m.err)
 		return s
 	}
-	s += fmt.Sprintf("  %s Switched to %s %s\n",
-		activeStyle.Render("✓"), m.selectedLang, m.selectedVerLabel)
+	if m.isMirrorApply {
+		s += fmt.Sprintf("  %s Set mirror to %s\n",
+			activeStyle.Render("✓"), m.selectedMirName)
+	} else {
+		s += fmt.Sprintf("  %s Switched to %s %s\n",
+			activeStyle.Render("✓"), m.selectedLang, m.selectedVerLabel)
+	}
 	s += m.pathWarning()
 	s += "\n  Press any key to quit.\n"
 	return s

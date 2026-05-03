@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod *)",
+      "Bash(mkdir -p cmd internal/config internal/core internal/ui)",
+      "mcp__plugin_claude-mem_mcp-search__smart_outline",
+      "Bash(go build *)",
+      "mcp__plugin_claude-mem_mcp-search__smart_search",
+      "mcp__plugin_claude-mem_mcp-search__smart_unfold"
+    ]
+  }
+}
