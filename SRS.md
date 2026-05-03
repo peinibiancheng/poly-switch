@@ -20,3 +20,21 @@ export PATH="$HOME/.poly-switch/bin:$PATH"
 你的 Go 程序只需要把 ~/.poly-switch/bin/java 指向具体的 JDK 路径，切换瞬间完成，无需重启终端。
 并发检查：利用 Go 的 goroutine，在 Bubble Tea 启动的 Init() 阶段，可以异步扫描本地已安装的 Java/Python 路径。
 状态反馈：Bubble Tea 的 Spinner 组件非常适合在 applySwitch 期间显示“正在切换...”的动效。
+
+### UI 设计补充：镜像管理与状态交互
+
+1. **状态降级（视觉补位）**
+   对于没有镜像源概念的语言，不要直接留白（会显得像 Bug），而是显示一个“不可用”或“系统接管”的状态。
+   - 有镜像源（如 Node）：`Mirror:  🚀 npmmirror.com (12ms)`
+   - 无镜像源（如部分纯本地语言）：`Mirror:  🔒 System Default (N/A)`  — 使用灰色文字，提示该语言目前不通过 poly-switch 管理镜像。
+
+2. **动态 Context 布局**
+   右侧详情栏不应该是“死板”的固定字段，而是根据左侧选中的语言动态渲染不同的组件卡片。
+   - 当选中 Node 时：右侧渲染 `[状态] [版本] [镜像源]` 等区块。
+   - 当选中 Java 时：右侧除了 `[状态] [版本]`，可能还会渲染 `[JDK 类型]`（比如 OpenJDK/Oracle）。
+   - 实现思路：在 Bubbletea 的 View 函数中，根据 `m.selectedLanguage` 使用 switch 语句分发不同的渲染逻辑。
+
+3. **底部按键的“灰度处理”**
+   这是交互体验中最重要的细节：如果当前语言没有某些管理功能，底部的快捷键提示应该改变。
+   - 选中支持镜像的语言：底部显示 `[M] Manage Mirrors`（正常/高亮）。
+   - 选中不支持镜像的语言：底部显示 `[M] Manage Mirrors`（暗灰色/删除线）或者直接隐藏该按键提示。
